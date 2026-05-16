@@ -131,9 +131,15 @@ fn is_encrypted(encryption: TffEncryptionType) -> bool {
     !matches!(encryption, TffEncryptionType::Unencrypted)
 }
 
-fn decrypt<'a>(
+fn read_header(buffer: &[u8]) -> Result<(TffHeader, u64), Box<dyn Error>> {
+    let mut cursor = Cursor::new(&buffer);
+    let header: TffHeader = cursor.read_ne()?;
+    Ok((header, cursor.position()))
+}
+
+fn aes_decrypt<'a, 'b>(
     cipher_text: &'a mut [u8],
-    salt: Option<&'a [u8]>,
+    salt: Option<&'b [u8]>,
 ) -> Result<&'a [u8], Box<dyn Error>> {
     let password = b"hKie/63L@aF!93Qm";
     let default_salt = b"8Zx0#aX(0$pr<7hN";
@@ -148,32 +154,22 @@ fn decrypt<'a>(
     Ok(data)
 }
 
-fn read_header(buffer: &[u8]) -> Result<(TffHeader, u64), Box<dyn Error>> {
-    let mut cursor = Cursor::new(&buffer);
-    let header: TffHeader = cursor.read_ne()?;
-    Ok((header, cursor.position()))
-}
-
-pub fn read_tff(path: &str) -> Result<TffFile, Box<dyn Error>> {
-    let mut f = File::open(path)?;
-    let mut file_content = Vec::new();
-    f.read_to_end(&mut file_content)?;
-
-    let (header, position) = read_header(&file_content)?;
-
-    let decrypted = if is_encrypted(header.encryption) {
+fn decrypt_data<'a>(data: &'a mut [u8], header: &TffHeader) -> Result<&'a [u8], Box<dyn Error>>  {
+    Ok(if is_encrypted(header.encryption) {
         let salt = if has_salt(header.version, header.encryption) {
             Some(header.salt.as_slice())
         } else {
             None
         };
 
-        decrypt(&mut file_content[position as usize..], salt)?
+        aes_decrypt(data, salt)?
     } else {
-        &file_content[position as usize..]
-    };
+        data
+    })
+}
 
-    let mut cursor = Cursor::new(decrypted);
+fn read_records(data: &[u8]) -> Result<Vec<TffRecord>, Box<dyn Error>> {
+    let mut cursor = Cursor::new(data);
     let mut records = Vec::new();
 
     loop {
@@ -184,6 +180,18 @@ pub fn read_tff(path: &str) -> Result<TffFile, Box<dyn Error>> {
 
         records.push(record);
     }
+
+    Ok(records)
+}
+
+pub fn read_tff(path: &str) -> Result<TffFile, Box<dyn Error>> {
+    let mut f = File::open(path)?;
+    let mut file_content = Vec::new();
+    f.read_to_end(&mut file_content)?;
+
+    let (header, position) = read_header(&file_content)?;
+    let data = decrypt_data(&mut file_content[position as usize..], &header)?;
+    let records = read_records(&data)?;
 
     Ok(TffFile { header, records })
 }
