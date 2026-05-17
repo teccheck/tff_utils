@@ -7,7 +7,6 @@ use std::{
 
 use aes::Aes256;
 use binread::{BinRead, BinReaderExt};
-use byteorder::{ByteOrder, LittleEndian};
 use cbc::Decryptor;
 use cipher::{BlockModeDecrypt, KeyIvInit, block_padding::NoPadding};
 use pbkdf2::pbkdf2_hmac_array;
@@ -64,21 +63,19 @@ impl Display for TffHeader {
 }
 
 #[derive(BinRead, Debug)]
-#[br(assert(record_checksum(record_type, &data) == crc))]
+//#[br(assert(record_checksum(record_type, &data) == crc))]
 pub struct TffRecord {
     data_len: u32,
 
+    #[br(args(data_len))]
     record_type: TffRecordType,
-
-    #[br(count = data_len)]
-    data: Vec<u8>,
 
     crc: u32,
 }
 
 impl Display for TffRecord {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?} ({})", self.record_type, self.data_len)?;
+        write!(f, "{}", self.record_type)?;
         Ok(())
     }
 }
@@ -91,37 +88,186 @@ enum TffEncryptionType {
     Aes256Cbc = 1,
 }
 
-#[derive(BinRead, Copy, Clone, Debug)]
-#[br(repr(u32))]
+#[derive(BinRead, Debug)]
+#[br(import(len: u32))]
 #[repr(u32)]
 enum TffRecordType {
-    EndOfFile = 0,
-    FirmwareDataPhoenix,
-    PrintPartIndex,
-    FirmwareVersion,
-    FirmwareVersionMask,
-    FirmwareCreationDate,
-    CompatabilityId,
-    FlasherVersion,
-    FirmwareDataSamurai,
-    ProductStringMaybe,
-    UpdateCommand = 10,
-    EncodedUpdateHeaderMaybe = 11,
-    ProductString = 15,
-    EncodedUpdateHeader,
-    PcmAudio,
-    FirmwareDataSubprint,
-    CapabilityData,
-    FirmwareSignature,
-    FirmwareDataHydra = 21,
+    #[br(magic(0u32), assert(len == 0))]
+    EndOfFile {} = 0,
+
+    #[br(magic = 1)]
+    FirmwareDataPhoenix {
+        start_address: u64,
+        #[br(count(len - 8))]
+        data: Vec<u8>,
+    },
+
+    #[br(magic(2u32), assert(len == 2))]
+    PrintPartIndex { print_index: u8, part_index: u8 },
+
+    #[br(magic(3u32))]
+    FirmwareVersion {
+        #[br(count = len, map = |x: Vec<u8>| String::from_utf8(x).unwrap())]
+        version: String,
+    },
+
+    #[br(magic(4u32))]
+    FirmwareVersionMask {
+        #[br(count = len, map = |x: Vec<u8>| String::from_utf8(x).unwrap())]
+        mask: String,
+    },
+
+    #[br(magic(5u32), assert(len == 7))]
+    FirmwareCreationDate {
+        day: u8,
+        month: u8,
+        year: u16,
+        hour: u8,
+        minute: u8,
+        second: u8,
+    },
+
+    #[br(magic(6u32), assert(len == 7))]
+    CompatabilityId {
+        #[br(count = len)]
+        data: Vec<u8>,
+    },
+
+    #[br(magic = 7u32, assert(len == 12))]
+    FlasherVersion { major: u32, minor: u32, build: u32 },
+
+    #[br(magic = 8u32)]
+    FirmwareDataSamurai {
+        #[br(count = len)]
+        unknown: Vec<u8>,
+    },
+
+    #[br(magic = 9u32)]
+    ProductStringMaybe {
+        #[br(count = len)]
+        unknown: Vec<u8>,
+    },
+
+    #[br(magic = 10u32)]
+    UpdateCommand {
+        #[br(count = len)]
+        unknown: Vec<u8>,
+    },
+    #[br(magic = 11u32)]
+    EncodedUpdateHeaderMaybe {
+        #[br(count = len)]
+        unknown: Vec<u8>,
+    } = 11,
+
+    #[br(magic = 15u32)]
+    ProductString {
+        #[br(count = len)]
+        unknown: Vec<u8>,
+    } = 15,
+
+    #[br(magic = 16u32)]
+    EncodedUpdateHeader {
+        #[br(count = len)]
+        unknown: Vec<u8>,
+    },
+
+    #[br(magic = 17u32)]
+    PcmAudio {
+        #[br(count = len)]
+        unknown: Vec<u8>,
+    },
+
+    #[br(magic = 18u32)]
+    FirmwareDataSubprint {
+        #[br(count = len)]
+        unknown: Vec<u8>,
+    },
+
+    #[br(magic = 19u32)]
+    CapabilityData {
+        #[br(count = len)]
+        unknown: Vec<u8>,
+    },
+
+    #[br(magic = 20u32)]
+    FirmwareSignature {
+        #[br(count = len)]
+        unknown: Vec<u8>,
+    },
+
+    #[br(magic = 21u32)]
+    FirmwareDataHydra {
+        #[br(count = len)]
+        unknown: Vec<u8>,
+    } = 21,
 }
 
-fn record_checksum(record_type: TffRecordType, data: &[u8]) -> u32 {
-    let mut vec = vec![0_u8, 0, 0, 0];
-    LittleEndian::write_u32(&mut vec, record_type as u32);
-    vec.extend_from_slice(data);
-    CRC32.checksum(&vec)
+impl Display for TffRecordType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TffRecordType::EndOfFile {} => write!(f, "End Of File")?,
+            TffRecordType::PrintPartIndex {
+                print_index,
+                part_index,
+            } => write!(f, "Print Index: {print_index}, Part Index: {part_index}")?,
+            TffRecordType::FirmwareVersion { version } => write!(f, "Firmware Version: {version}")?,
+            TffRecordType::FirmwareVersionMask { mask } => {
+                write!(f, "Firmware Version Mask: {mask}")?
+            }
+            TffRecordType::FirmwareCreationDate {
+                day,
+                month,
+                year,
+                hour,
+                minute,
+                second,
+            } => write!(
+                f,
+                "Firmware Creation Date: {year}-{month}-{day} {hour}:{minute}:{second}"
+            )?,
+            TffRecordType::CompatabilityId { data } => write!(f, "Compatability Id: {:X?}", data)?,
+            TffRecordType::FlasherVersion {
+                major,
+                minor,
+                build,
+            } => write!(f, "Flasher Version: {major}.{minor}.{build}")?,
+            TffRecordType::ProductStringMaybe { unknown: _ } => todo!(),
+            TffRecordType::UpdateCommand { unknown: _ } => todo!(),
+            TffRecordType::EncodedUpdateHeaderMaybe { unknown: _ } => todo!(),
+            TffRecordType::ProductString { unknown: _ } => todo!(),
+            TffRecordType::EncodedUpdateHeader { unknown: _ } => todo!(),
+            TffRecordType::PcmAudio { unknown: _ } => todo!(),
+            TffRecordType::CapabilityData { unknown } => {
+                write!(f, "Capability Data ({})", unknown.len())?
+            }
+            TffRecordType::FirmwareSignature { unknown } => {
+                write!(f, "Firmware Signature ({})", unknown.len())?
+            }
+
+            TffRecordType::FirmwareDataPhoenix { start_address, data } => {
+                write!(f, "Firmware Data Phoenix (Start {:X}, Len {})", start_address, data.len())?
+            }
+            TffRecordType::FirmwareDataSamurai { unknown } => {
+                write!(f, "Firmware Data Samurai ({})", unknown.len())?
+            }
+            TffRecordType::FirmwareDataSubprint { unknown } => {
+                write!(f, "Firmware Data Subprint ({})", unknown.len())?
+            }
+            TffRecordType::FirmwareDataHydra { unknown } => {
+                write!(f, "Firmware Data Hydra ({})", unknown.len())?
+            }
+        }
+
+        Ok(())
+    }
 }
+
+//fn record_checksum(record_type: TffRecordType, data: &[u8]) -> u32 {
+//    let mut vec = vec![0_u8, 0, 0, 0];
+//    LittleEndian::write_u32(&mut vec, record_type as u32);
+//    vec.extend_from_slice(data);
+//    CRC32.checksum(&vec)
+//}
 
 fn has_salt(version: u32, encryption: TffEncryptionType) -> bool {
     is_encrypted(encryption) && version == 2
@@ -137,9 +283,9 @@ fn read_header(buffer: &[u8]) -> Result<(TffHeader, u64), Box<dyn Error>> {
     Ok((header, cursor.position()))
 }
 
-fn aes_decrypt<'a, 'b>(
+fn aes_decrypt<'a>(
     cipher_text: &'a mut [u8],
-    salt: Option<&'b [u8]>,
+    salt: Option<&[u8]>,
 ) -> Result<&'a [u8], Box<dyn Error>> {
     let password = b"hKie/63L@aF!93Qm";
     let default_salt = b"8Zx0#aX(0$pr<7hN";
@@ -154,7 +300,7 @@ fn aes_decrypt<'a, 'b>(
     Ok(data)
 }
 
-fn decrypt_data<'a>(data: &'a mut [u8], header: &TffHeader) -> Result<&'a [u8], Box<dyn Error>>  {
+fn decrypt_data<'a>(data: &'a mut [u8], header: &TffHeader) -> Result<&'a [u8], Box<dyn Error>> {
     Ok(if is_encrypted(header.encryption) {
         let salt = if has_salt(header.version, header.encryption) {
             Some(header.salt.as_slice())
@@ -174,7 +320,7 @@ fn read_records(data: &[u8]) -> Result<Vec<TffRecord>, Box<dyn Error>> {
 
     loop {
         let record: TffRecord = cursor.read_ne()?;
-        if matches!(record.record_type, TffRecordType::EndOfFile) {
+        if matches!(record.record_type, TffRecordType::EndOfFile {}) {
             break;
         }
 
@@ -191,7 +337,7 @@ pub fn read_tff(path: &str) -> Result<TffFile, Box<dyn Error>> {
 
     let (header, position) = read_header(&file_content)?;
     let data = decrypt_data(&mut file_content[position as usize..], &header)?;
-    let records = read_records(&data)?;
+    let records = read_records(data)?;
 
     Ok(TffFile { header, records })
 }
