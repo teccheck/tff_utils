@@ -1,3 +1,4 @@
+mod record;
 mod tff;
 
 use std::{error::Error, path::Path};
