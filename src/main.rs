@@ -1,8 +1,8 @@
 mod tff;
 
-use std::error::Error;
+use std::{error::Error, path::Path};
 
-use crate::tff::read_tff;
+use crate::tff::{decrypt_tff, read_tff};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -15,8 +15,15 @@ struct CmdArgs {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Print info about this tff file
-    Info {
-        file: String,
+    Info { file: String },
+
+    /// Decrypt a tff and save it as unencrypted
+    Decrypt {
+        /// The file to decrypt
+        infile: String,
+
+        /// If none is given, the output file will be infile.dec.tff
+        outfile: Option<String>,
     },
 }
 
@@ -24,18 +31,14 @@ fn main() {
     let args = CmdArgs::parse();
 
     let result = match args.command {
-        Commands::Info { file } => info(file)
+        Commands::Info { file } => info(file),
+        Commands::Decrypt { infile, outfile } => decrypt(infile, outfile),
     };
 
     match result {
         Ok(_) => println!("Successful"),
         Err(e) => println!("Error: {}", e),
     }
-
-    //match read_tff() {
-    //    Ok(f) => println!("Ok: {}", f),
-    //    Err(e) => println!("Err: {:?}", e),
-    //}
 }
 
 fn info(file: String) -> Result<(), Box<dyn Error>> {
@@ -44,11 +47,14 @@ fn info(file: String) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-//fn write_tff(tff: TffFile) -> Result<(), Box<dyn Error>> {
-//    let mut f = File::create("firm.dec.tff")?;
-//    f.write_all(b"\x89TFF");
-//    f.write_all(b"\x02\x00\x00\x00");
-//    f.write_all(b"\x00\x00\x00\x00");
-//    f.write_all(&tff.data);
-//    Ok(())
-//}
+fn decrypt(infile: String, outfile: Option<String>) -> Result<(), Box<dyn Error>> {
+    let inpath = Path::new(&infile);
+
+    if let Some(out) = outfile {
+        decrypt_tff(&inpath, &Path::new(&out))?;
+    } else {
+        decrypt_tff(&inpath, inpath.with_extension(".dec.tff").as_path())?;
+    }
+
+    Ok(())
+}

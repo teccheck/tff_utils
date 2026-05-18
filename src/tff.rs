@@ -2,15 +2,18 @@ use std::{
     error::Error,
     fmt::Display,
     fs::File,
-    io::{Cursor, Read},
+    io::{Cursor, Read, Write}, path::Path,
 };
 
 use aes::Aes256;
 use binread::{BinRead, BinReaderExt};
+use byteorder::{LittleEndian, WriteBytesExt};
 use cbc::Decryptor;
 use cipher::{BlockModeDecrypt, KeyIvInit, block_padding::NoPadding};
 use pbkdf2::pbkdf2_hmac_array;
 use sha1::Sha1;
+
+const TFF_MAGIC: &[u8; 4] = b"\x89TFF";
 
 const CRC32: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::Algorithm {
     width: 32,
@@ -340,4 +343,21 @@ pub fn read_tff(path: &str) -> Result<TffFile, Box<dyn Error>> {
     let records = read_records(data)?;
 
     Ok(TffFile { header, records })
+}
+
+pub fn decrypt_tff(infile: &Path, outfile: &Path) -> Result<(), Box<dyn Error>> {
+    let mut infile = File::open(infile)?;
+    let mut file_content = Vec::new();
+    infile.read_to_end(&mut file_content)?;
+
+    let (header, position) = read_header(&file_content)?;
+    let data = decrypt_data(&mut file_content[position as usize..], &header)?;
+    
+    let mut outfile = File::open(outfile)?;
+    outfile.write_all(TFF_MAGIC)?;
+    outfile.write_u32::<LittleEndian>(2)?;
+    outfile.write_u32::<LittleEndian>(TffEncryptionType::Unencrypted as u32)?;
+    outfile.write_all(data)?;
+
+    Ok(())
 }
