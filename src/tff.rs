@@ -353,7 +353,7 @@ pub fn decrypt_tff(infile: &Path, outfile: &Path) -> Result<(), Box<dyn Error>> 
     let (header, position) = read_header(&file_content)?;
     let data = decrypt_data(&mut file_content[position as usize..], &header)?;
     
-    let mut outfile = File::open(outfile)?;
+    let mut outfile = File::create(outfile)?;
     outfile.write_all(TFF_MAGIC)?;
     outfile.write_u32::<LittleEndian>(2)?;
     outfile.write_u32::<LittleEndian>(TffEncryptionType::Unencrypted as u32)?;
