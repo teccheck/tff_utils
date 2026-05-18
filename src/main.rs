@@ -2,7 +2,7 @@ mod tff;
 
 use std::{error::Error, path::Path};
 
-use crate::tff::{decrypt_tff, dump_firmware, read_tff};
+use crate::tff::{decrypt_tff, dump_records, read_tff};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -26,7 +26,7 @@ pub enum Commands {
         outfile: Option<String>,
     },
 
-    /// Dumps all firmware data blobs into outdir named by their start address
+    /// Dumps all data blobs into outdir named
     Dump {
         /// The file to decrypt
         infile: String,
@@ -46,7 +46,7 @@ fn main() {
     };
 
     match result {
-        Ok(_) => println!("Successful"),
+        Ok(_) => {},
         Err(e) => println!("Error: {}", e),
     }
 }
@@ -72,6 +72,6 @@ fn decrypt(infile: String, outfile: Option<String>) -> Result<(), Box<dyn Error>
 fn dump(infile: String, outdir: String) -> Result<(), Box<dyn Error>> {
     let inpath = Path::new(&infile);
     let outpath = Path::new(&outdir);
-    dump_firmware(&inpath, &outpath)?;
+    dump_records(&inpath, &outpath)?;
     Ok(())
 }

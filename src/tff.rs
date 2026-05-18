@@ -2,7 +2,8 @@ use std::{
     error::Error,
     fmt::Display,
     fs::File,
-    io::{Cursor, Read, Write}, path::Path,
+    io::{Cursor, Read, Write},
+    path::Path,
 };
 
 use aes::Aes256;
@@ -37,8 +38,8 @@ pub struct TffFile {
 impl Display for TffFile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "TFF ({})", self.header)?;
-        for record in &self.records {
-            writeln!(f, "{}", record)?;
+        for (i, record) in self.records.iter().enumerate() {
+            writeln!(f, "{:02} | {}", i, record)?;
         }
         Ok(())
     }
@@ -98,7 +99,7 @@ enum TffRecordType {
     #[br(magic(0u32), assert(len == 0))]
     EndOfFile {} = 0,
 
-    #[br(magic = 1)]
+    #[br(magic(1u32))]
     FirmwareDataPhoenix {
         start_address: u64,
         #[br(count(len - 8))]
@@ -110,13 +111,13 @@ enum TffRecordType {
 
     #[br(magic(3u32))]
     FirmwareVersion {
-        #[br(count = len, map = |x: Vec<u8>| String::from_utf8(x).unwrap())]
+        #[br(count(len), map(parse_string))]
         version: String,
     },
 
     #[br(magic(4u32))]
     FirmwareVersionMask {
-        #[br(count = len, map = |x: Vec<u8>| String::from_utf8(x).unwrap())]
+        #[br(count(len), map(parse_string))]
         mask: String,
     },
 
@@ -136,72 +137,85 @@ enum TffRecordType {
         data: Vec<u8>,
     },
 
-    #[br(magic = 7u32, assert(len == 12))]
+    #[br(magic(7u32), assert(len == 12))]
     FlasherVersion { major: u32, minor: u32, build: u32 },
 
-    #[br(magic = 8u32)]
+    #[br(magic(8u32))]
     FirmwareDataSamurai {
-        #[br(count = len)]
-        unknown: Vec<u8>,
+        #[br(count(len))]
+        data: Vec<u8>,
     },
 
-    #[br(magic = 9u32)]
-    ProductStringMaybe {
-        #[br(count = len)]
-        unknown: Vec<u8>,
+    #[br(magic(9u32))]
+    ProductString {
+        #[br(count(len), map(parse_string))]
+        main_product_string: String,
     },
 
-    #[br(magic = 10u32)]
+    #[br(magic(10u32))]
     UpdateCommand {
-        #[br(count = len)]
-        unknown: Vec<u8>,
+        #[br(count(len), map(parse_string))]
+        command: String,
     },
-    #[br(magic = 11u32)]
-    EncodedUpdateHeaderMaybe {
-        #[br(count = len)]
-        unknown: Vec<u8>,
+    #[br(magic(11u32))]
+    EncodedUpdateHeader {
+        #[br(count(len), assert(len == 1024))]
+        main_header: Vec<u8>,
     } = 11,
 
-    #[br(magic = 15u32)]
-    ProductString {
-        #[br(count = len)]
+    // TODO (list of strings of len 21, at least one main (first))
+    #[br(magic(15u32))]
+    ProductStrings {
+        #[br(count(len))]
         unknown: Vec<u8>,
     } = 15,
 
-    #[br(magic = 16u32)]
-    EncodedUpdateHeader {
-        #[br(count = len)]
+    // TODO (list of u8 arrays of len 1024, at least one main (first))
+    #[br(magic(16u32))]
+    EncodedUpdateHeaders {
+        #[br(count(len))]
         unknown: Vec<u8>,
     },
 
-    #[br(magic = 17u32)]
+    // TODO: list of (unkn: i32, len: i32, segm: u8[len])
+    #[br(magic(17u32))]
     PcmAudio {
-        #[br(count = len)]
+        #[br(count(len))]
         unknown: Vec<u8>,
     },
 
     #[br(magic = 18u32)]
     FirmwareDataSubprint {
-        #[br(count = len)]
-        unknown: Vec<u8>,
+        image_type: ImageTypeSubprint,
+
+        #[br(count(len - 1))]
+        data: Vec<u8>,
     },
 
-    #[br(magic = 19u32)]
+    #[br(magic(19u32))]
     CapabilityData {
+        // This is gzipped data
         #[br(count = len)]
         unknown: Vec<u8>,
     },
 
-    #[br(magic = 20u32)]
+    #[br(magic(20u32))]
     FirmwareSignature {
-        #[br(count = len)]
-        unknown: Vec<u8>,
+        #[br(count(len))]
+        signature: Vec<u8>,
     },
 
-    #[br(magic = 21u32)]
+    #[br(magic(21u32))]
     FirmwareDataHydra {
-        #[br(count = len)]
-        unknown: Vec<u8>,
+        id: i32,
+
+        hash_len: i32,
+
+        #[br(count(hash_len))]
+        hash: Vec<u8>,
+
+        #[br(count(len - hash_len as u32 - 8))]
+        data: Vec<u8>,
     } = 21,
 }
 
@@ -226,7 +240,8 @@ impl Display for TffRecordType {
                 second,
             } => write!(
                 f,
-                "Firmware Creation Date: {year}-{month}-{day} {hour}:{minute}:{second}"
+                "Firmware Creation Date: {:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+                year, month, day, hour, minute, second
             )?,
             TffRecordType::CompatabilityId { data } => write!(f, "Compatability Id: {:X?}", data)?,
             TffRecordType::FlasherVersion {
@@ -234,35 +249,68 @@ impl Display for TffRecordType {
                 minor,
                 build,
             } => write!(f, "Flasher Version: {major}.{minor}.{build}")?,
-            TffRecordType::ProductStringMaybe { unknown: _ } => todo!(),
-            TffRecordType::UpdateCommand { unknown: _ } => todo!(),
-            TffRecordType::EncodedUpdateHeaderMaybe { unknown: _ } => todo!(),
-            TffRecordType::ProductString { unknown: _ } => todo!(),
-            TffRecordType::EncodedUpdateHeader { unknown: _ } => todo!(),
+            TffRecordType::ProductString {
+                main_product_string,
+            } => write!(f, "Product String: {}", main_product_string)?,
+            TffRecordType::UpdateCommand { command } => write!(f, "Update Command: {}", command)?,
+            TffRecordType::EncodedUpdateHeader { main_header: _ } => {
+                write!(f, "Encoded Update Header (TODO)")?
+            }
+            TffRecordType::ProductStrings { unknown: _ } => todo!(),
+            TffRecordType::EncodedUpdateHeaders { unknown: _ } => {
+                write!(f, "Encoded Update Headers (TODO)")?
+            }
             TffRecordType::PcmAudio { unknown: _ } => todo!(),
             TffRecordType::CapabilityData { unknown } => {
-                write!(f, "Capability Data ({})", unknown.len())?
+                write!(f, "Capability Data (Len {})", unknown.len())?
             }
-            TffRecordType::FirmwareSignature { unknown } => {
-                write!(f, "Firmware Signature ({})", unknown.len())?
+            TffRecordType::FirmwareSignature { signature } => {
+                write!(f, "Firmware Signature (Len {})", signature.len())?
             }
-
-            TffRecordType::FirmwareDataPhoenix { start_address, data } => {
-                write!(f, "Firmware Data Phoenix (Start {:X}, Len {})", start_address, data.len())?
+            TffRecordType::FirmwareDataPhoenix {
+                start_address,
+                data,
+            } => write!(
+                f,
+                "Firmware Data Phoenix (Start {:X}, End: {:X}, Len {})",
+                start_address,
+                *start_address as usize + data.len() - 1,
+                data.len()
+            )?,
+            TffRecordType::FirmwareDataSamurai { data } => {
+                write!(f, "Firmware Data Samurai (Len {})", data.len())?
             }
-            TffRecordType::FirmwareDataSamurai { unknown } => {
-                write!(f, "Firmware Data Samurai ({})", unknown.len())?
-            }
-            TffRecordType::FirmwareDataSubprint { unknown } => {
-                write!(f, "Firmware Data Subprint ({})", unknown.len())?
-            }
-            TffRecordType::FirmwareDataHydra { unknown } => {
-                write!(f, "Firmware Data Hydra ({})", unknown.len())?
-            }
+            TffRecordType::FirmwareDataSubprint { image_type, data } => write!(
+                f,
+                "Firmware Data Subprint (Type {:?}, Len {})",
+                image_type,
+                data.len()
+            )?,
+            TffRecordType::FirmwareDataHydra {
+                id,
+                hash_len: _,
+                hash,
+                data,
+            } => write!(
+                f,
+                "Firmware Data Hydra (ID {}, Hash {:X?}, Len {})",
+                id,
+                hash,
+                data.len()
+            )?,
         }
 
         Ok(())
     }
+}
+
+#[derive(BinRead, Debug)]
+#[br(repr(u8))]
+#[repr(u8)]
+enum ImageTypeSubprint {
+    Softdevice = 0,
+    Bootloader,
+    Application,
 }
 
 //fn record_checksum(record_type: TffRecordType, data: &[u8]) -> u32 {
@@ -271,6 +319,11 @@ impl Display for TffRecordType {
 //    vec.extend_from_slice(data);
 //    CRC32.checksum(&vec)
 //}
+
+// TODO: Needs swion encoding
+fn parse_string(data: Vec<u8>) -> String {
+    String::from_utf8(data).unwrap()
+}
 
 fn has_salt(version: u32, encryption: TffEncryptionType) -> bool {
     is_encrypted(encryption) && version == 2
@@ -352,7 +405,7 @@ pub fn decrypt_tff(infile: &Path, outfile: &Path) -> Result<(), Box<dyn Error>> 
 
     let (header, position) = read_header(&file_content)?;
     let data = decrypt_data(&mut file_content[position as usize..], &header)?;
-    
+
     let mut outfile = File::create(outfile)?;
     outfile.write_all(TFF_MAGIC)?;
     outfile.write_u32::<LittleEndian>(2)?;
@@ -362,19 +415,34 @@ pub fn decrypt_tff(infile: &Path, outfile: &Path) -> Result<(), Box<dyn Error>> 
     Ok(())
 }
 
-pub fn dump_firmware(infile: &Path, outdir: &Path) -> Result<(), Box<dyn Error>> {
+pub fn dump_records(infile: &Path, outdir: &Path) -> Result<(), Box<dyn Error>> {
     let tff = read_tff(infile)?;
 
-    for record in tff.records {
-        match record.record_type {
-            TffRecordType::FirmwareDataPhoenix { start_address, data } => {
-                let out = outdir.join(format!("{:016X}.bin", start_address));
+    for (i, record) in tff.records.iter().enumerate() {
+        match &record.record_type {
+            TffRecordType::FirmwareDataPhoenix {
+                start_address,
+                data,
+            } => {
+                let out = outdir.join(format!("{:02}_firm_{:06X}.bin", i, start_address));
                 let mut outfile = File::create(out)?;
                 outfile.write_all(&data)?;
-            },
+            }
+
+            TffRecordType::FirmwareSignature { signature } => {
+                let out = outdir.join(format!("{:02}_signature.bin", i));
+                let mut outfile = File::create(out)?;
+                outfile.write_all(&signature)?;
+            }
+
+            TffRecordType::CapabilityData { unknown } => {
+                let out = outdir.join(format!("{:02}_capability_data.bin", i));
+                let mut outfile = File::create(out)?;
+                outfile.write_all(&unknown)?;
+            }
             _ => {}
         }
     }
-    
+
     Ok(())
 }
