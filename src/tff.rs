@@ -333,8 +333,8 @@ fn read_records(data: &[u8]) -> Result<Vec<TffRecord>, Box<dyn Error>> {
     Ok(records)
 }
 
-pub fn read_tff(path: &str) -> Result<TffFile, Box<dyn Error>> {
-    let mut f = File::open(path)?;
+pub fn read_tff(infile: &Path) -> Result<TffFile, Box<dyn Error>> {
+    let mut f = File::open(infile)?;
     let mut file_content = Vec::new();
     f.read_to_end(&mut file_content)?;
 
@@ -359,5 +359,22 @@ pub fn decrypt_tff(infile: &Path, outfile: &Path) -> Result<(), Box<dyn Error>> 
     outfile.write_u32::<LittleEndian>(TffEncryptionType::Unencrypted as u32)?;
     outfile.write_all(data)?;
 
+    Ok(())
+}
+
+pub fn dump_firmware(infile: &Path, outdir: &Path) -> Result<(), Box<dyn Error>> {
+    let tff = read_tff(infile)?;
+
+    for record in tff.records {
+        match record.record_type {
+            TffRecordType::FirmwareDataPhoenix { start_address, data } => {
+                let out = outdir.join(format!("{:016X}.bin", start_address));
+                let mut outfile = File::create(out)?;
+                outfile.write_all(&data)?;
+            },
+            _ => {}
+        }
+    }
+    
     Ok(())
 }

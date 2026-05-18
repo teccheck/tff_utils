@@ -2,7 +2,7 @@ mod tff;
 
 use std::{error::Error, path::Path};
 
-use crate::tff::{decrypt_tff, read_tff};
+use crate::tff::{decrypt_tff, dump_firmware, read_tff};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -25,6 +25,15 @@ pub enum Commands {
         /// If none is given, the output file will be infile.dec.tff
         outfile: Option<String>,
     },
+
+    /// Dumps all firmware data blobs into outdir named by their start address
+    Dump {
+        /// The file to decrypt
+        infile: String,
+
+        /// The director to output all blobs to
+        outdir: String,
+    },
 }
 
 fn main() {
@@ -33,6 +42,7 @@ fn main() {
     let result = match args.command {
         Commands::Info { file } => info(file),
         Commands::Decrypt { infile, outfile } => decrypt(infile, outfile),
+        Commands::Dump { infile, outdir } => dump(infile, outdir),
     };
 
     match result {
@@ -41,8 +51,8 @@ fn main() {
     }
 }
 
-fn info(file: String) -> Result<(), Box<dyn Error>> {
-    let tff = read_tff(&file)?;
+fn info(infile: String) -> Result<(), Box<dyn Error>> {
+    let tff = read_tff(Path::new(&infile))?;
     println!("{}", tff);
     Ok(())
 }
@@ -53,8 +63,15 @@ fn decrypt(infile: String, outfile: Option<String>) -> Result<(), Box<dyn Error>
     if let Some(out) = outfile {
         decrypt_tff(&inpath, &Path::new(&out))?;
     } else {
-        decrypt_tff(&inpath, inpath.with_extension(".dec.tff").as_path())?;
+        decrypt_tff(&inpath, inpath.with_extension("dec.tff").as_path())?;
     }
 
+    Ok(())
+}
+
+fn dump(infile: String, outdir: String) -> Result<(), Box<dyn Error>> {
+    let inpath = Path::new(&infile);
+    let outpath = Path::new(&outdir);
+    dump_firmware(&inpath, &outpath)?;
     Ok(())
 }
