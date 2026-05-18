@@ -156,7 +156,7 @@ pub fn dump_records(infile: &Path, outdir: &Path) -> Result<(), Box<dyn Error>> 
     }
 
     let tff = read_tff(infile)?;
-    
+
     let out = outdir.join(format!("info.txt"));
     let mut outfile = File::create(out)?;
     write!(outfile, "{}", &tff.to_string())?;

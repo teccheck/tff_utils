@@ -1,5 +1,11 @@
 use binread::{BinRead, BinReaderExt};
-use std::{error::Error, fmt::Display, fs::File, io::{Cursor, Write}, path::Path};
+use std::{
+    error::Error,
+    fmt::Display,
+    fs::File,
+    io::{Cursor, Write},
+    path::Path,
+};
 
 #[derive(BinRead, Debug)]
 //#[br(assert(record_checksum(record_type, &data) == crc))]
@@ -183,7 +189,7 @@ impl Display for TffRecordType {
             TffRecordType::EncodedUpdateHeader { main_header: _ } => {
                 write!(f, "Encoded Update Header (TODO)")?
             }
-            TffRecordType::ProductStrings { unknown: _ } => todo!(),
+            TffRecordType::ProductStrings { unknown: _ } => write!(f, "Product Strings (TODO)")?,
             TffRecordType::EncodedUpdateHeaders { unknown: _ } => {
                 write!(f, "Encoded Update Headers (TODO)")?
             }
@@ -277,37 +283,60 @@ pub fn dump_record(i: usize, outdir: &Path, record: &TffRecord) -> Result<(), Bo
             let out = outdir.join(format!("{:02}_firm_phoenix_{:06X}.bin", i, start_address));
             let mut outfile = File::create(out)?;
             outfile.write_all(&data)?;
-        },
+        }
 
         TffRecordType::FirmwareDataSamurai { data } => {
             let out = outdir.join(format!("{:02}_firm_samurai.bin", i));
             let mut outfile = File::create(out)?;
             outfile.write_all(&data)?;
-        },
+        }
 
-        TffRecordType::FirmwareDataHydra { id, hash_len: _, hash: _, data } => {
+        TffRecordType::FirmwareDataHydra {
+            id,
+            hash_len: _,
+            hash: _,
+            data,
+        } => {
             let out = outdir.join(format!("{:02}_firm_hydra_{:06X}.bin", i, id));
             let mut outfile = File::create(out)?;
             outfile.write_all(&data)?;
-        },
-        
+        }
+
         TffRecordType::FirmwareDataSubprint { image_type, data } => {
             let out = outdir.join(format!("{:02}_firm_subprint_{:?}.bin", i, image_type));
             let mut outfile = File::create(out)?;
             outfile.write_all(&data)?;
-        },
+        }
 
         TffRecordType::FirmwareSignature { signature } => {
             let out = outdir.join(format!("{:02}_signature.bin", i));
             let mut outfile = File::create(out)?;
             outfile.write_all(&signature)?;
-        },
+        }
 
         TffRecordType::CapabilityData { unknown } => {
             let out = outdir.join(format!("{:02}_capability_data.xml.gz", i));
             let mut outfile = File::create(out)?;
             outfile.write_all(&unknown)?;
-        },
+        }
+
+        TffRecordType::EncodedUpdateHeader { main_header } => {
+            let out = outdir.join(format!("{:02}_header.bin", i));
+            let mut outfile = File::create(out)?;
+            outfile.write_all(&main_header)?;
+        }
+
+        TffRecordType::EncodedUpdateHeaders { unknown } => {
+            let out = outdir.join(format!("{:02}_headers.bin", i));
+            let mut outfile = File::create(out)?;
+            outfile.write_all(&unknown)?;
+        }
+
+        TffRecordType::PcmAudio { unknown } => {
+            let out = outdir.join(format!("{:02}_pcm_audio.bin", i));
+            let mut outfile = File::create(out)?;
+            outfile.write_all(&unknown)?;
+        }
 
         _ => {}
     }
